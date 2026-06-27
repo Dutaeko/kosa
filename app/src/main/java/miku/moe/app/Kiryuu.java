@@ -46,8 +46,9 @@ public class Kiryuu extends KomikcastClient {
                 @Override public void onSuccess(String body, boolean ignored) {
                     MangaCoroutines.io(() -> {
                         try {
-                            ArrayList<MangaPost> out = parseList(body);
-                            boolean hasNext = out.size() >= 1;
+                            JsonObject root = parseRoot(body);
+                            ArrayList<MangaPost> out = parseList(root, body);
+                            boolean hasNext = hasNextPage(root, page);
                             LIST_CACHE.put(key, new ArrayList<>(out));
                             MangaCoroutines.main(() -> cb.onSuccess(out, hasNext));
                         } catch(Exception e) { MangaCoroutines.main(() -> cb.onError("Daftar Kiryuu gagal dibaca")); }
@@ -176,37 +177,26 @@ public class Kiryuu extends KomikcastClient {
     private HttpUrl buildListUrl(int page, String sort, String query, String genre) throws Exception {
         int safePage = Math.max(1, page);
         boolean searching = query != null && !query.trim().isEmpty();
-        if (searching) {
-            HttpUrl.Builder builder = HttpUrl.parse(base() + "/api/manga-list").newBuilder();
-            builder.addQueryParameter("q", query.trim());
-            builder.addQueryParameter("page", String.valueOf(safePage));
-            builder.addQueryParameter("limit", "8");
-            return builder.build();
-        }
         String genreFilter = extractGenreFilter(genre);
         String typeFilter = extractTypeFilter(genre);
         String s = sort == null ? "" : sort.trim().toLowerCase(Locale.ROOT);
         if (("manga".equals(s) || "manhwa".equals(s) || "manhua".equals(s)) && typeFilter.isEmpty()) typeFilter = s;
         String order = "latest";
         if ("popular".equals(s) || "popularity".equals(s)) order = "popular";
-        HttpUrl.Builder builder = HttpUrl.parse(base() + "/manga").newBuilder();
+        HttpUrl.Builder builder = HttpUrl.parse(base() + "/api/manga-list").newBuilder();
+        builder.addQueryParameter("page", String.valueOf(safePage));
+        builder.addQueryParameter("limit", searching ? "8" : "12");
+        if (searching) builder.addQueryParameter("q", query.trim());
         if (!genreFilter.isEmpty()) builder.addQueryParameter("genre", genreFilter);
         if (!typeFilter.isEmpty()) builder.addQueryParameter("type", typeFilter);
         builder.addQueryParameter("order", order);
-        if (safePage > 1) builder.addQueryParameter("page", String.valueOf(safePage));
-        builder.addQueryParameter("_rsc", "1");
         return builder.build();
     }
 
-    private ArrayList<MangaPost> parseList(String body) {
+    private ArrayList<MangaPost> parseList(JsonObject root, String body) {
         ArrayList<MangaPost> out = new ArrayList<>();
         LinkedHashSet<String> seen = new LinkedHashSet<>();
-        JsonArray data = null;
-        try {
-            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-            JsonElement element = root.get("data");
-            if (element != null && element.isJsonArray()) data = element.getAsJsonArray();
-        } catch(Exception ignored) { }
+        JsonArray data = root == null ? null : arr(root, "data");
         if (data == null) data = extractArray(body, "mangas");
         if (data == null) return out;
         for (JsonElement element : data) {
@@ -216,6 +206,18 @@ public class Kiryuu extends KomikcastClient {
             if (!key.isEmpty() && seen.add(key)) out.add(post);
         }
         return out;
+    }
+
+    private JsonObject parseRoot(String body) {
+        try { return JsonParser.parseString(body).getAsJsonObject(); } catch(Exception e) { return null; }
+    }
+
+    private boolean hasNextPage(JsonObject root, int currentPage) {
+        JsonObject pagination = obj(root, "pagination");
+        if (pagination == null) return false;
+        int current = intval(pagination, "currentPage", Math.max(1, currentPage));
+        int total = intval(pagination, "totalPages", current);
+        return current < total;
     }
 
     private MangaPost parsePost(JsonObject object) {

@@ -280,6 +280,11 @@ public class Comicaso extends KomikcastClient {
                 if (!response.isSuccessful()) { MangaCoroutines.main(() -> cb.onError("HTTP " + response.code())); return; }
                 try {
                     JsonObject obj = JsonParser.parseString(body).getAsJsonObject();
+                    if (obj.has("ok") && !obj.get("ok").isJsonNull() && !obj.get("ok").getAsBoolean()) {
+                        String message = getString(obj, "message");
+                        MangaCoroutines.main(() -> cb.onError(message.isEmpty() ? "Data Comicaso ditolak" : message));
+                        return;
+                    }
                     MangaCoroutines.main(() -> cb.onSuccess(obj, false));
                 } catch(Exception e) { MangaCoroutines.main(() -> cb.onError("Data Comicaso gagal dibaca")); }
             }
